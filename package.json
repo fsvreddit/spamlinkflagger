@@ -5,11 +5,6 @@
   "license": "BSD-3-Clause",
   "type": "module",
   "scripts": {
-    "deploy": "devvit upload",
-    "dev": "dotenv -e .env -- devvit playtest",
-    "login": "devvit login",
-    "launch": "devvit publish",
-    "type-check": "tsc --build",
     "test": "npm run test:unit",
     "test:unit": "vitest --run"
   },
