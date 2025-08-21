@@ -52,6 +52,7 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
 
 export async function handleCommentDelete (event: CommentDelete, context: TriggerContext) {
     if (event.source as number === 1) {
+        // Comment deleted by user rather than removed by a moderator or Reddit
         await context.redis.del(getCommentKey(event.commentId));
     }
 }
