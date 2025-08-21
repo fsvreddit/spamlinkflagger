@@ -51,7 +51,9 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
 }
 
 export async function handleCommentDelete (event: CommentDelete, context: TriggerContext) {
-    await context.redis.del(event.commentId);
+    if (event.source as number === 1) {
+        await context.redis.del(getCommentKey(event.commentId));
+    }
 }
 
 export async function handleCommentEdit (event: CommentUpdate, context: TriggerContext) {
