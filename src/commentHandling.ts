@@ -6,7 +6,7 @@ import pluralize from "pluralize";
 
 export function commentContainsALink (comment: string) {
     const urlRegexes = [
-        /https?:\/\//,
+        /https?:\/\/\S+/,
         /www(?:\.[A-Za-z0-9_-]+)+\/\S+\b/,
     ];
 
@@ -28,7 +28,6 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
     await context.redis.set(getCommentKey(id), body, { expiration: DateTime.now().plus({ days: 28 }).toJSDate() });
 
     if (!commentContainsALink(body)) {
-        console.log(`Comment ${id} does not contain a link`);
         return;
     }
 
@@ -74,6 +73,8 @@ export async function handleCommentEdit (event: CommentUpdate, context: TriggerC
         // No previous record of comment body, so cannot assume that it didn't contain a link before.
         return;
     }
+
+    await context.redis.set(id, body, { expiration: DateTime.now().plus({ days: 28 }).toJSDate() });
 
     if (commentContainsALink(previousBody)) {
         // Comment previously contained a URL, so likely not malicious.
