@@ -11,7 +11,7 @@ export const appSettings: SettingsFormField[] = [
     {
         type: "boolean",
         name: AppSetting.FlagCommentsOnOldPosts,
-        label: "Report comments on old posts that contain a link",
+        label: "Report comments that contain a link if they are made on old posts",
         defaultValue: true,
     },
     {

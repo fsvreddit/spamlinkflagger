@@ -1,7 +1,7 @@
 This Dev Platform app flags comments via reports when:
 
-* A user makes a comments on an old post that include a URL
-* A user edits a comment that didn't originally include a URL, to include one within 28 days of the comment being created
+* A user makes a comments with a link on an old post
+* A user edits a comment that didn't originally include a link to include one.
 
 By default, an "old post" is one that is 30 days or older, but this setting can be configured as you wish. You can also configure a "grace period" (default 5 minutes) where a user editing a comment to include a link will not result in it being flagged.
 
