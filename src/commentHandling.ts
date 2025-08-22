@@ -60,7 +60,6 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
 
     const comment = await context.reddit.getCommentById(id);
     await context.reddit.report(comment, { reason: `Comment with a link on a post over ${oldPostTimeframe} ${pluralize("day", oldPostTimeframe)} old` });
-    console.log(`Reported comment ${id} for containing a link on an old post`);
 }
 
 export async function handleCommentDelete (event: CommentDelete, context: TriggerContext) {
