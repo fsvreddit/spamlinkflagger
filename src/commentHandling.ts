@@ -17,6 +17,19 @@ function getCommentKey (commentId: string) {
     return `comment:${commentId}`;
 }
 
+async function getPostCreationDate (postId: string, context: TriggerContext): Promise<Date> {
+    const redisKey = `postCreation:${postId}`;
+    const cachedValue = await context.redis.get(redisKey);
+    if (cachedValue) {
+        return new Date(JSON.parse(cachedValue) as number);
+    }
+
+    const post = await context.reddit.getPostById(postId);
+    await context.redis.set(redisKey, JSON.stringify(post.createdAt.getTime()), { expiration: DateTime.now().plus({ days: 7 }).toJSDate() });
+    console.log(`Cached post creation date for post ${postId}: ${post.createdAt}`);
+    return post.createdAt;
+}
+
 export async function handleCommentCreate (event: CommentCreate, context: TriggerContext) {
     const { id, body, postId } = event.comment ?? {};
 
@@ -39,8 +52,8 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
     const oldPostTimeframe = settings[AppSetting.FlagCommentsOnOldPostsTimeframe] as number | undefined ?? 30;
 
     // Comment contains a link. Check post date.
-    const post = await context.reddit.getPostById(postId);
-    if (post.createdAt > DateTime.now().minus({ days: oldPostTimeframe }).toJSDate()) {
+    const postCreationDate = await getPostCreationDate(postId, context);
+    if (postCreationDate > DateTime.now().minus({ days: oldPostTimeframe }).toJSDate()) {
         // Post is not old enough to flag
         return;
     }
