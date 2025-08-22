@@ -26,7 +26,6 @@ async function getPostCreationDate (postId: string, context: TriggerContext): Pr
 
     const post = await context.reddit.getPostById(postId);
     await context.redis.set(redisKey, JSON.stringify(post.createdAt.getTime()), { expiration: DateTime.now().plus({ days: 7 }).toJSDate() });
-    console.log(`Cached post creation date for post ${postId}: ${post.createdAt}`);
     return post.createdAt;
 }
 
@@ -60,6 +59,7 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
 
     const comment = await context.reddit.getCommentById(id);
     await context.reddit.report(comment, { reason: `Comment with a link on a post over ${oldPostTimeframe} ${pluralize("day", oldPostTimeframe)} old` });
+    console.log(`Reported comment ${id} for containing a link on an old post`);
 }
 
 export async function handleCommentDelete (event: CommentDelete, context: TriggerContext) {
