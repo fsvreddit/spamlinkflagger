@@ -6,7 +6,7 @@ import pluralize from "pluralize";
 
 export function commentContainsALink (comment: string) {
     const urlRegexes = [
-        /https?:\/\//,
+        /https?:\/\/\S+/,
         /www(?:\.[A-Za-z0-9_-]+)+\/\S+\b/,
     ];
 
@@ -15,6 +15,18 @@ export function commentContainsALink (comment: string) {
 
 function getCommentKey (commentId: string) {
     return `comment:${commentId}`;
+}
+
+async function getPostCreationDate (postId: string, context: TriggerContext): Promise<Date> {
+    const redisKey = `postCreation:${postId}`;
+    const cachedValue = await context.redis.get(redisKey);
+    if (cachedValue) {
+        return new Date(JSON.parse(cachedValue) as number);
+    }
+
+    const post = await context.reddit.getPostById(postId);
+    await context.redis.set(redisKey, JSON.stringify(post.createdAt.getTime()), { expiration: DateTime.now().plus({ days: 7 }).toJSDate() });
+    return post.createdAt;
 }
 
 export async function handleCommentCreate (event: CommentCreate, context: TriggerContext) {
@@ -28,7 +40,6 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
     await context.redis.set(getCommentKey(id), body, { expiration: DateTime.now().plus({ days: 28 }).toJSDate() });
 
     if (!commentContainsALink(body)) {
-        console.log(`Comment ${id} does not contain a link`);
         return;
     }
 
@@ -40,8 +51,8 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
     const oldPostTimeframe = settings[AppSetting.FlagCommentsOnOldPostsTimeframe] as number | undefined ?? 30;
 
     // Comment contains a link. Check post date.
-    const post = await context.reddit.getPostById(postId);
-    if (post.createdAt > DateTime.now().minus({ days: oldPostTimeframe }).toJSDate()) {
+    const postCreationDate = await getPostCreationDate(postId, context);
+    if (postCreationDate > DateTime.now().minus({ days: oldPostTimeframe }).toJSDate()) {
         // Post is not old enough to flag
         return;
     }
@@ -52,7 +63,10 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
 }
 
 export async function handleCommentDelete (event: CommentDelete, context: TriggerContext) {
-    await context.redis.del(event.commentId);
+    if (event.source as number === 1) {
+        // Comment deleted by user rather than removed by a moderator or Reddit
+        await context.redis.del(getCommentKey(event.commentId));
+    }
 }
 
 export async function handleCommentEdit (event: CommentUpdate, context: TriggerContext) {
@@ -74,6 +88,8 @@ export async function handleCommentEdit (event: CommentUpdate, context: TriggerC
         // No previous record of comment body, so cannot assume that it didn't contain a link before.
         return;
     }
+
+    await context.redis.set(id, body, { expiration: DateTime.now().plus({ days: 28 }).toJSDate() });
 
     if (commentContainsALink(previousBody)) {
         // Comment previously contained a URL, so likely not malicious.
