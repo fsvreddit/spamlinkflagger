@@ -11,6 +11,11 @@ Comments over 28 days old will not be checked on edit. This is to reduce the dat
 
 ## Change History
 
-v1.0.0
+### v1.0.1
+
+* Improve app efficiency, reducing resource usage on Dev Platform
+* Update Devvit and dependencies to latest versions
+
+### v1.0.0
 
 * Initial public release

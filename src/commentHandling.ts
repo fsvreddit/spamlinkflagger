@@ -17,29 +17,15 @@ function getCommentKey (commentId: string) {
     return `comment:${commentId}`;
 }
 
-async function getPostCreationDate (postId: string, context: TriggerContext): Promise<Date> {
-    const redisKey = `postCreation:${postId}`;
-    const cachedValue = await context.redis.get(redisKey);
-    if (cachedValue) {
-        return new Date(JSON.parse(cachedValue) as number);
-    }
-
-    const post = await context.reddit.getPostById(postId);
-    await context.redis.set(redisKey, JSON.stringify(post.createdAt.getTime()), { expiration: DateTime.now().plus({ days: 7 }).toJSDate() });
-    return post.createdAt;
-}
-
 export async function handleCommentCreate (event: CommentCreate, context: TriggerContext) {
-    const { id, body, postId } = event.comment ?? {};
-
-    if (!id || body === undefined || !postId) {
-        console.error("Event is missing expected comment ID, body, or post ID property");
+    if (!event.comment || !event.post) {
+        console.error("Event is missing expected comment or post property");
         return;
     }
 
-    await context.redis.set(getCommentKey(id), body, { expiration: DateTime.now().plus({ days: 28 }).toJSDate() });
+    await context.redis.set(getCommentKey(event.comment.id), event.comment.body, { expiration: DateTime.now().plus({ days: 28 }).toJSDate() });
 
-    if (!commentContainsALink(body)) {
+    if (!commentContainsALink(event.comment.body)) {
         return;
     }
 
@@ -51,15 +37,15 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
     const oldPostTimeframe = settings[AppSetting.FlagCommentsOnOldPostsTimeframe] as number | undefined ?? 30;
 
     // Comment contains a link. Check post date.
-    const postCreationDate = await getPostCreationDate(postId, context);
+    const postCreationDate = new Date(event.post.createdAt);
     if (postCreationDate > DateTime.now().minus({ days: oldPostTimeframe }).toJSDate()) {
         // Post is not old enough to flag
         return;
     }
 
-    const comment = await context.reddit.getCommentById(id);
+    const comment = await context.reddit.getCommentById(event.comment.id);
     await context.reddit.report(comment, { reason: `Comment with a link on a post over ${oldPostTimeframe} ${pluralize("day", oldPostTimeframe)} old` });
-    console.log(`Reported comment ${id} for containing a link on an old post`);
+    console.log(`Reported comment ${event.comment.id} for containing a link on an old post`);
 }
 
 export async function handleCommentDelete (event: CommentDelete, context: TriggerContext) {
