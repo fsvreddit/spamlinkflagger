@@ -3,6 +3,7 @@ import { CommentCreate, CommentDelete, CommentUpdate } from "@devvit/protos";
 import { DateTime } from "luxon";
 import { AppSetting } from "./settings.js";
 import pluralize from "pluralize";
+import { isModerator } from "devvit-helpers";
 
 export function commentContainsALink (comment: string) {
     const urlRegexes = [
@@ -15,6 +16,16 @@ export function commentContainsALink (comment: string) {
 
 function getCommentKey (commentId: string) {
     return `comment:${commentId}`;
+}
+
+async function userIsModerator (username: string, context: TriggerContext) {
+    const subredditName = context.subredditName ?? await context.reddit.getCurrentSubredditName();
+
+    if (username === "AutoModerator" || username === `${subredditName}-ModTeam`) {
+        return true;
+    }
+
+    return await isModerator(context.reddit, subredditName, username);
 }
 
 export async function handleCommentCreate (event: CommentCreate, context: TriggerContext) {
@@ -44,6 +55,11 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
     }
 
     const comment = await context.reddit.getCommentById(event.comment.id);
+
+    if (await userIsModerator(comment.authorName, context)) {
+        return;
+    }
+
     await context.reddit.report(comment, { reason: `Comment with a link on a post over ${oldPostTimeframe} ${pluralize("day", oldPostTimeframe)} old` });
     console.log(`Reported comment ${event.comment.id} for containing a link on an old post`);
 }
@@ -93,6 +109,10 @@ export async function handleCommentEdit (event: CommentUpdate, context: TriggerC
     const ignoreEditsWithinTimeframe = settings[AppSetting.IgnoreEditsWithinTimeframe] as number | undefined ?? 5;
     const createdAt = DateTime.fromJSDate(comment.createdAt);
     if (createdAt > DateTime.now().minus({ minutes: ignoreEditsWithinTimeframe })) {
+        return;
+    }
+
+    if (await userIsModerator(comment.authorName, context)) {
         return;
     }
 

@@ -11,6 +11,10 @@ Comments over 28 days old will not be checked on edit. This is to reduce the dat
 
 ## Change History
 
+### v1.0.2
+
+* Exclude moderators from all checks
+
 ### v1.0.1
 
 * Improve app efficiency, reducing resource usage on Dev Platform
