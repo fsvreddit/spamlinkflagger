@@ -1,9 +1,10 @@
 import { TriggerContext } from "@devvit/public-api";
-import { CommentCreate, CommentDelete, CommentUpdate } from "@devvit/protos";
+import { CommentCreate, CommentUpdate } from "@devvit/protos";
 import { DateTime } from "luxon";
 import { AppSetting } from "./settings.js";
 import pluralize from "pluralize";
 import { isModerator } from "devvit-helpers";
+import { hasTriggerBeenHandled } from "@fsvreddit/fsv-devvit-helpers";
 
 export function commentContainsALink (comment: string) {
     const urlRegexes = [
@@ -12,10 +13,6 @@ export function commentContainsALink (comment: string) {
     ];
 
     return urlRegexes.some(regex => regex.test(comment));
-}
-
-function getCommentKey (commentId: string) {
-    return `comment:${commentId}`;
 }
 
 async function userIsModerator (username: string, context: TriggerContext) {
@@ -34,9 +31,11 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
         return;
     }
 
-    await context.redis.set(getCommentKey(event.comment.id), event.comment.body, { expiration: DateTime.now().plus({ days: 28 }).toJSDate() });
-
     if (!commentContainsALink(event.comment.body)) {
+        return;
+    }
+
+    if (await hasTriggerBeenHandled(context.redis, `commentCreate:${event.comment.id}`)) {
         return;
     }
 
@@ -64,13 +63,6 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
     console.log(`Reported comment ${event.comment.id} for containing a link on an old post`);
 }
 
-export async function handleCommentDelete (event: CommentDelete, context: TriggerContext) {
-    if (event.source as number === 1) {
-        // Comment deleted by user rather than removed by a moderator or Reddit
-        await context.redis.del(getCommentKey(event.commentId));
-    }
-}
-
 export async function handleCommentEdit (event: CommentUpdate, context: TriggerContext) {
     const { id, body } = event.comment ?? {};
 
@@ -79,27 +71,17 @@ export async function handleCommentEdit (event: CommentUpdate, context: TriggerC
         return;
     }
 
-    if (!commentContainsALink(body)) {
-        // Comment does not contain a link, so no need to check for edits. Just store the new body.
-        await context.redis.set(id, body, { expiration: DateTime.now().plus({ days: 28 }).toJSDate() });
-        return;
-    }
-
-    const previousBody = await context.redis.get(getCommentKey(id));
-    if (previousBody === undefined) {
-        // No previous record of comment body, so cannot assume that it didn't contain a link before.
-        return;
-    }
-
-    await context.redis.set(id, body, { expiration: DateTime.now().plus({ days: 28 }).toJSDate() });
-
-    if (commentContainsALink(previousBody)) {
+    if (commentContainsALink(event.previousBody)) {
         // Comment previously contained a URL, so likely not malicious.
         return;
     }
 
     const settings = await context.settings.getAll();
     if (!settings[AppSetting.FlagCommentEdits]) {
+        return;
+    }
+
+    if (await hasTriggerBeenHandled(context.redis, `commentEdit:${id}`, { expiration: DateTime.now().plus({ seconds: 30 }).toJSDate() })) {
         return;
     }
 
