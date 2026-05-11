@@ -7,9 +7,12 @@ By default, an "old post" is one that is 30 days or older, but this setting can 
 
 Only comments made since the app was installed will be checked on edit. This is because the app needs to check the original body text, and this is only stored once the app is installed.
 
-Comments over 28 days old will not be checked on edit. This is to reduce the data retention requirements of the app.
-
 ## Change History
+
+### v1.0.6
+
+* Fixed bug introduced in v1.0.3 that reports edited comments even if they do not contain a link (oops)
+* App can now check edits to comments of any age, not just under 28 days old
 
 ### v1.0.3
 

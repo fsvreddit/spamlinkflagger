@@ -71,6 +71,10 @@ export async function handleCommentEdit (event: CommentUpdate, context: TriggerC
         return;
     }
 
+    if (!commentContainsALink(body)) {
+        return;
+    }
+
     if (commentContainsALink(event.previousBody)) {
         // Comment previously contained a URL, so likely not malicious.
         return;
@@ -88,6 +92,8 @@ export async function handleCommentEdit (event: CommentUpdate, context: TriggerC
     // Comment has been edited to include a URL when none was present previously. Report the comment.
     const comment = await context.reddit.getCommentById(id);
 
+    console.log(`Checking comment ${id} edited by ${comment.authorName}`);
+
     const ignoreEditsWithinTimeframe = settings[AppSetting.IgnoreEditsWithinTimeframe] as number | undefined ?? 5;
     const createdAt = DateTime.fromJSDate(comment.createdAt);
     if (createdAt > DateTime.now().minus({ minutes: ignoreEditsWithinTimeframe })) {
@@ -95,6 +101,7 @@ export async function handleCommentEdit (event: CommentUpdate, context: TriggerC
     }
 
     if (await userIsModerator(comment.authorName, context)) {
+        console.log(`Not reporting comment ${id} because author ${comment.authorName} is a moderator`);
         return;
     }
 
