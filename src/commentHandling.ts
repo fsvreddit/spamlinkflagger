@@ -1,10 +1,18 @@
-import { TriggerContext } from "@devvit/public-api";
+import { JobContext, ScheduledJobEvent, TriggerContext } from "@devvit/public-api";
 import { CommentCreate, CommentUpdate } from "@devvit/protos";
-import { DateTime } from "luxon";
+import { addSeconds, subDays, subMinutes } from "date-fns";
 import { AppSetting } from "./settings.js";
 import pluralize from "pluralize";
 import { isModerator } from "devvit-helpers";
 import { hasTriggerBeenHandled } from "@fsvreddit/fsv-devvit-helpers";
+import { SchedulerJob } from "./constants.js";
+import { getAutomodStatusForComment } from "./automodTracker.js";
+
+type ReportCommentJobData = {
+    commentId: string;
+    reportText: string;
+    jobGuid: string;
+};
 
 export function commentContainsALink (comment: string) {
     const urlRegexes = [
@@ -31,7 +39,26 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
         return;
     }
 
-    if (!commentContainsALink(event.comment.body)) {
+    const postCreationDate = new Date(event.post.createdAt);
+    // Min allowed setting is 1 day so early exit if post date is under one day, which will be most comments.
+    if (postCreationDate > subDays(new Date(), 1)) {
+        // Post is not old enough to flag
+        return;
+    }
+
+    const settings = await context.settings.getAll();
+    if (!settings[AppSetting.FlagCommentsWithLinksOnOldPosts] && !settings[AppSetting.FlagAnyCommentsOnOldPosts]) {
+        return;
+    }
+
+    if (!settings[AppSetting.FlagAnyCommentsOnOldPosts] && !commentContainsALink(event.comment.body)) {
+        return;
+    }
+
+    const oldPostTimeframe = settings[AppSetting.FlagCommentsOnOldPostsTimeframe] as number | undefined ?? 30;
+
+    if (postCreationDate > subDays(new Date(), oldPostTimeframe)) {
+        // Post is not old enough to flag
         return;
     }
 
@@ -39,28 +66,16 @@ export async function handleCommentCreate (event: CommentCreate, context: Trigge
         return;
     }
 
-    const settings = await context.settings.getAll();
-    if (!settings[AppSetting.FlagCommentsOnOldPosts]) {
-        return;
-    }
-
-    const oldPostTimeframe = settings[AppSetting.FlagCommentsOnOldPostsTimeframe] as number | undefined ?? 30;
-
-    // Comment contains a link. Check post date.
-    const postCreationDate = new Date(event.post.createdAt);
-    if (postCreationDate > DateTime.now().minus({ days: oldPostTimeframe }).toJSDate()) {
-        // Post is not old enough to flag
-        return;
-    }
-
-    const comment = await context.reddit.getCommentById(event.comment.id);
-
-    if (await userIsModerator(comment.authorName, context)) {
-        return;
-    }
-
-    await context.reddit.report(comment, { reason: `Comment with a link on a post over ${oldPostTimeframe} ${pluralize("day", oldPostTimeframe)} old` });
-    console.log(`Reported comment ${event.comment.id} for containing a link on an old post`);
+    // Schedule a job on a short delay to report the comment. This is to allow any associated AutoMod actions to process.
+    await context.scheduler.runJob<ReportCommentJobData>({
+        name: SchedulerJob.ReportComment,
+        data: {
+            commentId: event.comment.id,
+            reportText: `Comment with a link on a post over ${oldPostTimeframe} ${pluralize("day", oldPostTimeframe)} old`,
+            jobGuid: crypto.randomUUID(),
+        },
+        runAt: addSeconds(new Date(), 10),
+    });
 }
 
 export async function handleCommentEdit (event: CommentUpdate, context: TriggerContext) {
@@ -85,7 +100,7 @@ export async function handleCommentEdit (event: CommentUpdate, context: TriggerC
         return;
     }
 
-    if (await hasTriggerBeenHandled(context.redis, `commentEdit:${id}`, { expiration: DateTime.now().plus({ seconds: 30 }).toJSDate() })) {
+    if (await hasTriggerBeenHandled(context.redis, `commentEdit:${id}`, { expiration: addSeconds(new Date(), 30) })) {
         return;
     }
 
@@ -95,16 +110,44 @@ export async function handleCommentEdit (event: CommentUpdate, context: TriggerC
     console.log(`Checking comment ${id} edited by ${comment.authorName}`);
 
     const ignoreEditsWithinTimeframe = settings[AppSetting.IgnoreEditsWithinTimeframe] as number | undefined ?? 5;
-    const createdAt = DateTime.fromJSDate(comment.createdAt);
-    if (createdAt > DateTime.now().minus({ minutes: ignoreEditsWithinTimeframe })) {
+    if (comment.createdAt > subMinutes(new Date(), ignoreEditsWithinTimeframe)) {
+        return;
+    }
+
+    await context.scheduler.runJob<ReportCommentJobData>({
+        name: SchedulerJob.ReportComment,
+        data: {
+            commentId: id,
+            reportText: `Comment edited to include a link`,
+            jobGuid: crypto.randomUUID(),
+        },
+        runAt: addSeconds(new Date(), 10),
+    });
+}
+
+export async function reportComment (event: ScheduledJobEvent<ReportCommentJobData>, context: JobContext) {
+    if (await hasTriggerBeenHandled(context.redis, `reportComment:${event.data.jobGuid}`)) {
+        console.warn(`Job ${event.data.jobGuid} has already been handled. Skipping reportComment.`);
+        return;
+    }
+
+    if (await getAutomodStatusForComment(event.data.commentId, context) === "removed") {
+        console.log(`Comment ${event.data.commentId} has already been removed by AutoMod. Skipping reportComment.`);
+        return;
+    }
+
+    const comment = await context.reddit.getCommentById(event.data.commentId);
+
+    if (comment.spam || comment.removed) {
+        console.log(`Comment ${event.data.commentId} has already been removed or marked as spam. Skipping reportComment.`);
         return;
     }
 
     if (await userIsModerator(comment.authorName, context)) {
-        console.log(`Not reporting comment ${id} because author ${comment.authorName} is a moderator`);
+        console.log(`Not reporting comment ${event.data.commentId} because author ${comment.authorName} is a moderator`);
         return;
     }
 
-    await context.reddit.report(comment, { reason: "Comment edited to include a link" });
-    console.log(`Reported comment ${id} for editing to include a link`);
+    await context.reddit.report(comment, { reason: event.data.reportText });
+    console.log(`Reported comment ${comment.id} for containing a link on an old post`);
 }
